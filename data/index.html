@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DLMS 2.4 Controller</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0a0f;--panel:#14141f;--panel2:#1a1a2e;--accent:#00bcd4;--accent2:#00e5ff;--accent-dim:rgba(0,188,212,.15);--text:#e8e8f0;--text2:#8888a0;--border:#252540;--green:#00e676;--yellow:#ffd600;--red:#ff1744;--orange:#ff9100;--radius:10px;--shadow:0 4px 24px rgba(0,0,0,.4)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+/* ---- LOGIN OVERLAY ---- */
+#loginOverlay{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;transition:opacity .4s}
+#loginOverlay.hidden{opacity:0;pointer-events:none}
+.login-box{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:40px;width:340px;text-align:center;box-shadow:var(--shadow)}
+.login-box h2{color:var(--accent);margin-bottom:8px;font-size:1.6rem;letter-spacing:1px}
+.login-box p{color:var(--text2);font-size:.85rem;margin-bottom:24px}
+.login-box input{width:100%;padding:12px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:1rem;outline:none;margin-bottom:16px;transition:border-color .2s}
+.login-box input:focus{border-color:var(--accent)}
+.login-box button{width:100%;padding:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;color:#000;font-weight:600;font-size:1rem;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.login-box button:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(0,188,212,.4)}
+.login-error{color:var(--red);font-size:.85rem;min-height:20px}
+/* ---- HEADER ---- */
+.header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--border)}
+.header h1{font-size:1.2rem;color:var(--accent);font-weight:600;letter-spacing:.5px}
+.header-right{display:flex;align-items:center;gap:14px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.btn-sm{padding:6px 14px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:.8rem;cursor:pointer;transition:.2s}
+.btn-sm:hover{border-color:var(--accent);color:var(--text)}
+/* ---- MAIN LAYOUT ---- */
+.app{display:none;flex-direction:column;height:100vh}
+.app.visible{display:flex}
+.main-content{flex:1;display:grid;grid-template-rows:auto 1fr;overflow:hidden;padding:12px;gap:12px}
+/* ---- VISUALIZER ---- */
+.viz-panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;height:200px;position:relative}
+.viz-panel canvas{width:100%;height:100%}
+/* ---- MIXER ---- */
+.mixer-section{display:flex;gap:12px;overflow:auto}
+.mixer-left{display:flex;gap:8px}
+.mixer-right{display:flex;gap:8px;flex:1}
+.ch-strip{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:72px;cursor:pointer;transition:.2s}
+.ch-strip:hover,.ch-strip.selected{border-color:var(--accent);box-shadow:0 0 12px var(--accent-dim)}
+.ch-strip .ch-label{font-size:.75rem;font-weight:600;color:var(--text2);text-transform:uppercase}
+.ch-strip.selected .ch-label{color:var(--accent)}
+.vu-bar{width:14px;height:80px;background:#000;border-radius:3px;overflow:hidden;position:relative}
+.vu-fill{position:absolute;bottom:0;left:0;width:100%;background:linear-gradient(to top,var(--green) 60%,var(--yellow) 85%,var(--red) 100%);transition:height 80ms linear}
+.ch-db{font-size:.7rem;color:var(--text2);font-variant-numeric:tabular-nums}
+.btn-mute{padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--text2);border-radius:4px;font-size:.65rem;font-weight:600;cursor:pointer;transition:.15s}
+.btn-mute.active{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 8px rgba(255,23,68,.4)}
+.separator{width:1px;background:var(--border);margin:0 4px;align-self:stretch}
+/* ---- BOTTOM PANEL (Tabbed Controls) ---- */
+.bottom-panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);overflow-x:auto}
+.tab-btn{padding:8px 16px;background:transparent;border:none;color:var(--text2);font-size:.8rem;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:.2s}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}
+.tab-content{padding:14px;display:none;max-height:280px;overflow-y:auto}
+.tab-content.active{display:block}
+/* ---- FORM CONTROLS ---- */
+.ctrl-row{display:grid;grid-template-columns:130px 1fr;align-items:center;gap:10px;margin-bottom:10px}
+.ctrl-row label{font-size:.8rem;color:var(--text2)}
+.ctrl-row select,.ctrl-row input[type=number]{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:.85rem;outline:none}
+.ctrl-row select:focus,.ctrl-row input:focus{border-color:var(--accent)}
+.ctrl-row input[type=range]{-webkit-appearance:none;background:var(--border);height:4px;border-radius:2px;outline:none;flex:1}
+.ctrl-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer}
+.toggle-btn{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:.8rem;cursor:pointer;transition:.2s}
+.toggle-btn.on{border-color:var(--green);color:var(--green);background:rgba(0,230,118,.08)}
+.toggle-btn.off{border-color:var(--red);color:var(--red)}
+/* ---- PEQ TABLE ---- */
+.peq-table{width:100%;border-collapse:collapse;font-size:.8rem}
+.peq-table th{text-align:left;color:var(--text2);padding:4px 8px;font-weight:500;border-bottom:1px solid var(--border)}
+.peq-table td{padding:4px 8px}
+.peq-table tr:hover{background:var(--accent-dim)}
+.peq-table input,.peq-table select{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:.78rem}
+/* ---- FIR PANEL ---- */
+.fir-section{display:flex;gap:16px;align-items:flex-start}
+.fir-info{flex:1}
+.fir-upload{display:flex;flex-direction:column;gap:8px}
+.fir-upload input[type=file]{font-size:.8rem;color:var(--text2)}
+.fir-canvas{width:100%;height:80px;background:#000;border-radius:6px;border:1px solid var(--border)}
+/* ---- SETTINGS MODAL ---- */
+.modal-overlay{position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center}
+.modal-overlay.visible{display:flex}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:28px;width:380px;max-width:90vw;box-shadow:var(--shadow)}
+.modal h3{color:var(--accent);margin-bottom:16px}
+.modal input{width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;outline:none;margin-bottom:12px}
+.modal input:focus{border-color:var(--accent)}
+.modal-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:8px}
+.modal-btns button{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:.9rem}
+.modal-btns .btn-primary{background:var(--accent);color:#000}
+.modal-btns .btn-cancel{background:var(--panel2);color:var(--text2);border:1px solid var(--border)}
+.msg{font-size:.8rem;min-height:18px;margin-top:4px}
+.msg.ok{color:var(--green)}.msg.err{color:var(--red)}
+</style>
+</head>
+<body>
+<!-- ==================== LOGIN ==================== -->
+<div id="loginOverlay">
+  <div class="login-box">
+    <h2>DLMS 2.4</h2>
+    <p>Digital Loudspeaker Management System</p>
+    <input type="password" id="loginPass" placeholder="Enter admin password" autocomplete="off">
+    <div class="login-error" id="loginError"></div>
+    <button id="loginBtn" onclick="doLogin()">LOGIN</button>
+  </div>
+</div>
+
+<!-- ==================== MAIN APP ==================== -->
+<div class="app" id="mainApp">
+  <!-- HEADER -->
+  <div class="header">
+    <h1>DLMS 2.4 PRO</h1>
+    <div class="header-right">
+      <select id="presetSelect" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.8rem"></select>
+      <button class="btn-sm" onclick="presetSave()">Save</button>
+      <button class="btn-sm" onclick="presetExport()">Export</button>
+      <button class="btn-sm" onclick="showSettings()">⚙ Settings</button>
+      <span class="status-dot" id="statusDot"></span>
+      <span style="font-size:.8rem;color:var(--text2)" id="statusText">Connected</span>
+      <button class="btn-sm" onclick="doLogout()" style="color:var(--red)">Logout</button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <!-- VISUALIZER -->
+    <div class="viz-panel"><canvas id="vizCanvas"></canvas></div>
+
+    <!-- MIXER + CONTROLS -->
+    <div style="display:flex;flex-direction:column;gap:12px;overflow:auto">
+      <!-- MIXER STRIPS -->
+      <div class="mixer-section">
+        <div class="mixer-left">
+          <div class="ch-strip" id="ch-in1" onclick="selectCh('in',0)">
+            <div class="ch-label">IN 1</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-in1" style="height:0%"></div></div>
+            <div class="ch-db" id="db-in1">-∞</div>
+            <button class="btn-mute" id="mute-in1" onclick="event.stopPropagation();toggleMute('in1')">M</button>
+          </div>
+          <div class="ch-strip" id="ch-in2" onclick="selectCh('in',1)">
+            <div class="ch-label">IN 2</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-in2" style="height:0%"></div></div>
+            <div class="ch-db" id="db-in2">-∞</div>
+            <button class="btn-mute" id="mute-in2" onclick="event.stopPropagation();toggleMute('in2')">M</button>
+          </div>
+        </div>
+        <div class="separator"></div>
+        <div class="mixer-right">
+          <div class="ch-strip" id="ch-outA" onclick="selectCh('out',0)">
+            <div class="ch-label">OUT A</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-outA" style="height:0%"></div></div>
+            <div class="ch-db" id="db-outA">-∞</div>
+            <button class="btn-mute" id="mute-outA" onclick="event.stopPropagation();toggleMute('outA')">M</button>
+          </div>
+          <div class="ch-strip" id="ch-outB" onclick="selectCh('out',1)">
+            <div class="ch-label">OUT B</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-outB" style="height:0%"></div></div>
+            <div class="ch-db" id="db-outB">-∞</div>
+            <button class="btn-mute" id="mute-outB" onclick="event.stopPropagation();toggleMute('outB')">M</button>
+          </div>
+          <div class="ch-strip" id="ch-outC" onclick="selectCh('out',2)">
+            <div class="ch-label">OUT C</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-outC" style="height:0%"></div></div>
+            <div class="ch-db" id="db-outC">-∞</div>
+            <button class="btn-mute" id="mute-outC" onclick="event.stopPropagation();toggleMute('outC')">M</button>
+          </div>
+          <div class="ch-strip" id="ch-outD" onclick="selectCh('out',3)">
+            <div class="ch-label">OUT D</div>
+            <div class="vu-bar"><div class="vu-fill" id="vu-outD" style="height:0%"></div></div>
+            <div class="ch-db" id="db-outD">-∞</div>
+            <button class="btn-mute" id="mute-outD" onclick="event.stopPropagation();toggleMute('outD')">M</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABBED PARAMETER PANEL -->
+      <div class="bottom-panel" id="paramPanel">
+        <div class="tab-bar" id="tabBar">
+          <button class="tab-btn active" data-tab="routing">Routing</button>
+          <button class="tab-btn" data-tab="xover">Crossover</button>
+          <button class="tab-btn" data-tab="peq">PEQ</button>
+          <button class="tab-btn" data-tab="fir">FIR</button>
+          <button class="tab-btn" data-tab="delay">Delay</button>
+          <button class="tab-btn" data-tab="limiter">Limiter</button>
+        </div>
+        <!-- TAB: ROUTING -->
+        <div class="tab-content active" id="tab-routing">
+          <div class="ctrl-row"><label>Channel</label><span id="selChName" style="color:var(--accent);font-weight:600">OUT A</span></div>
+          <div class="ctrl-row"><label>Source</label>
+            <select id="routeSrc" onchange="setRoute()"><option value="0">IN 1</option><option value="1">IN 2</option><option value="2" selected>IN 1 + IN 2 (SUM)</option></select>
+          </div>
+          <div class="ctrl-row"><label>Output Gain</label>
+            <div style="display:flex;align-items:center;gap:8px"><input type="range" id="outGain" min="-60" max="12" step="0.5" value="0" oninput="setOutGain()"><span id="outGainVal" style="font-size:.8rem;width:50px">0.0 dB</span></div>
+          </div>
+          <div class="ctrl-row"><label>Phase</label>
+            <button class="toggle-btn" id="phaseBtn" onclick="togglePhase()">0°</button>
+          </div>
+        </div>
+        <!-- TAB: CROSSOVER -->
+        <div class="tab-content" id="tab-xover">
+          <h4 style="color:var(--accent);margin-bottom:8px">High-Pass Filter (HPF)</h4>
+          <div class="ctrl-row"><label>Enable</label><button class="toggle-btn" id="hpfEn" onclick="toggleXover('hpf')">OFF</button></div>
+          <div class="ctrl-row"><label>Frequency</label><div style="display:flex;gap:8px;align-items:center"><input type="number" id="hpfFreq" value="20" min="10" max="20000" step="0.5" onchange="setXover('hpf')"> Hz</div></div>
+          <div class="ctrl-row"><label>Type</label><select id="hpfType" onchange="setXover('hpf')"><option value="0">Butterworth</option><option value="1">Bessel</option><option value="2" selected>Linkwitz-Riley</option></select></div>
+          <div class="ctrl-row"><label>Slope</label><select id="hpfSlope" onchange="setXover('hpf')"><option value="1">6 dB/Oct</option><option value="2">12 dB/Oct</option><option value="3">18 dB/Oct</option><option value="4" selected>24 dB/Oct</option><option value="8">48 dB/Oct</option></select></div>
+          <hr style="border-color:var(--border);margin:12px 0">
+          <h4 style="color:var(--accent);margin-bottom:8px">Low-Pass Filter (LPF)</h4>
+          <div class="ctrl-row"><label>Enable</label><button class="toggle-btn" id="lpfEn" onclick="toggleXover('lpf')">OFF</button></div>
+          <div class="ctrl-row"><label>Frequency</label><div style="display:flex;gap:8px;align-items:center"><input type="number" id="lpfFreq" value="20000" min="10" max="20000" step="0.5" onchange="setXover('lpf')"> Hz</div></div>
+          <div class="ctrl-row"><label>Type</label><select id="lpfType" onchange="setXover('lpf')"><option value="0">Butterworth</option><option value="1">Bessel</option><option value="2" selected>Linkwitz-Riley</option></select></div>
+          <div class="ctrl-row"><label>Slope</label><select id="lpfSlope" onchange="setXover('lpf')"><option value="1">6 dB/Oct</option><option value="2">12 dB/Oct</option><option value="3">18 dB/Oct</option><option value="4" selected>24 dB/Oct</option><option value="8">48 dB/Oct</option></select></div>
+        </div>
+        <!-- TAB: PEQ -->
+        <div class="tab-content" id="tab-peq">
+          <table class="peq-table">
+            <thead><tr><th>#</th><th>En</th><th>Type</th><th>Freq (Hz)</th><th>Gain (dB)</th><th>Q</th></tr></thead>
+            <tbody id="peqBody"></tbody>
+          </table>
+        </div>
+        <!-- TAB: FIR -->
+        <div class="tab-content" id="tab-fir">
+          <div class="fir-section">
+            <div class="fir-info">
+              <div class="ctrl-row"><label>FIR Enable</label><button class="toggle-btn" id="firEn" onclick="toggleFIR()">OFF</button></div>
+              <div class="ctrl-row"><label>Active Taps</label><span id="firTaps" style="color:var(--accent);font-size:.9rem">1 / 256</span></div>
+              <canvas class="fir-canvas" id="firCanvas"></canvas>
+            </div>
+            <div class="fir-upload">
+              <label style="color:var(--text2);font-size:.8rem">Upload FIR Coefficients (.txt / .csv)</label>
+              <input type="file" id="firFile" accept=".txt,.csv,.json" onchange="uploadFIR()">
+              <p style="font-size:.7rem;color:var(--text2)">One coefficient per line, max 256 taps</p>
+            </div>
+          </div>
+        </div>
+        <!-- TAB: DELAY -->
+        <div class="tab-content" id="tab-delay">
+          <div class="ctrl-row"><label>Delay</label><div style="display:flex;gap:8px;align-items:center"><input type="range" id="delaySlider" min="0" max="500" step="0.1" value="0" oninput="setDelay()" style="flex:1"><span id="delayVal" style="font-size:.85rem;width:70px">0.0 ms</span></div></div>
+          <div class="ctrl-row"><label>Distance</label><span id="delayDist" style="color:var(--text2);font-size:.85rem">0.0 cm / 0.0 in</span></div>
+          <div class="ctrl-row"><label>Samples</label><span id="delaySamples" style="color:var(--text2);font-size:.85rem">0</span></div>
+        </div>
+        <!-- TAB: LIMITER -->
+        <div class="tab-content" id="tab-limiter">
+          <div class="ctrl-row"><label>Enable</label><button class="toggle-btn" id="limEn" onclick="toggleLimiter()">OFF</button></div>
+          <div class="ctrl-row"><label>Threshold</label><div style="display:flex;gap:8px;align-items:center"><input type="range" id="limThresh" min="-30" max="0" step="0.5" value="-2" oninput="setLimiter()"><span id="limThreshVal" style="font-size:.85rem;width:60px">-2.0 dBFS</span></div></div>
+          <div class="ctrl-row"><label>Attack</label><div style="display:flex;gap:8px;align-items:center"><input type="range" id="limAttack" min="0.1" max="100" step="0.1" value="10" oninput="setLimiter()"><span id="limAttackVal" style="font-size:.85rem;width:50px">10 ms</span></div></div>
+          <div class="ctrl-row"><label>Release</label><div style="display:flex;gap:8px;align-items:center"><input type="range" id="limRelease" min="10" max="2000" step="10" value="100" oninput="setLimiter()"><span id="limReleaseVal" style="font-size:.85rem;width:60px">100 ms</span></div></div>
+          <div class="ctrl-row"><label>Gain Reduction</label><div id="grMeter" style="width:100%;height:10px;background:var(--bg);border-radius:4px;overflow:hidden"><div id="grFill" style="height:100%;width:0%;background:var(--yellow);transition:width .1s"></div></div></div>
+          <div class="ctrl-row"><label></label><span id="grVal" style="color:var(--text2);font-size:.8rem">0.0 dB</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SETTINGS MODAL ==================== -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h3>⚙ System Settings</h3>
+    <h4 style="color:var(--text2);margin-bottom:8px;font-size:.9rem">Change Admin Password</h4>
+    <input type="password" id="oldPass" placeholder="Current password">
+    <input type="password" id="newPass" placeholder="New password (min 4 chars)">
+    <input type="password" id="newPass2" placeholder="Confirm new password">
+    <div class="msg" id="passMsg"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="hideSettings()">Cancel</button>
+      <button class="btn-primary" onclick="changePassword()">Save Password</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================== STATE ====================
+let ws, authToken='', dspState=null;
+let selType='out', selIdx=0;
+const outNames=['outA','outB','outC','outD'];
+const chNames={in:['in1','in2'],out:['outA','outB','outC','outD']};
+
+// ==================== AUTH ====================
+function doLogin(){
+  const p=document.getElementById('loginPass').value;
+  if(!p){document.getElementById('loginError').textContent='Enter password';return;}
+  initWS(p);
+}
+function doLogout(){
+  if(ws&&ws.readyState===1) ws.send(JSON.stringify({cmd:'logout'}));
+  authToken='';localStorage.removeItem('dlms_token');
+  document.getElementById('mainApp').classList.remove('visible');
+  document.getElementById('loginOverlay').classList.remove('hidden');
+}
+document.getElementById('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+
+// ==================== WEBSOCKET ====================
+function initWS(loginPass){
+  const gw=`ws://${location.hostname||'192.168.4.1'}:81/`;
+  ws=new WebSocket(gw);
+  ws.onopen=()=>{
+    console.log('WS connected');
+    if(loginPass){ws.send(JSON.stringify({cmd:'login',password:loginPass}));}
+    else if(authToken){ws.send(JSON.stringify({cmd:'login',password:'',token:authToken}));}
+  };
+  ws.onclose=()=>{
+    document.getElementById('statusDot').style.background='var(--red)';
+    document.getElementById('statusText').textContent='Disconnected';
+    setTimeout(()=>initWS(),3000);
+  };
+  ws.onmessage=e=>{
+    const d=JSON.parse(e.data);
+    if(d.type==='authOk'){
+      authToken=d.token;localStorage.setItem('dlms_token',d.token);
+      document.getElementById('loginOverlay').classList.add('hidden');
+      document.getElementById('mainApp').classList.add('visible');
+      document.getElementById('statusDot').style.background='var(--green)';
+      document.getElementById('statusText').textContent='Connected';
+      resizeViz();
+    }
+    else if(d.type==='authFail'){document.getElementById('loginError').textContent=d.msg||'Auth failed';}
+    else if(d.type==='authRequired'){
+      const stored=localStorage.getItem('dlms_token');
+      if(stored&&!loginPass){ws.send(JSON.stringify({cmd:'login',password:'',token:stored}));}
+    }
+    else if(d.type==='state'&&d.data){dspState=d.data;applyState();}
+    else if(d.type==='vu'){updateVU(d);}
+    else if(d.type==='passwordChanged'){
+      const m=document.getElementById('passMsg');
+      if(d.ok){m.className='msg ok';m.textContent='Password changed!';}
+      else{m.className='msg err';m.textContent=d.msg||'Failed';}
+    }
+    else if(d.type==='presetData'){
+      const blob=new Blob([JSON.stringify(d.data,null,2)],{type:'application/json'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='dlms_preset.json';a.click();
+    }
+  };
+}
+
+// ==================== VU METERS ====================
+function updateVU(d){
+  const set=(id,pct,db)=>{document.getElementById('vu-'+id).style.height=pct+'%';document.getElementById('db-'+id).textContent=db>-60?db.toFixed(0)+'dB':'-∞';};
+  set('in1',d.in1,d.in1dB);set('in2',d.in2,d.in2dB);
+  set('outA',d.outA,d.oAdB);set('outB',d.outB,d.oBdB);set('outC',d.outC,d.oCdB);set('outD',d.outD,d.oDdB);
+  // GR meter
+  if(d.gr&&selType==='out'){
+    const gr=Math.abs(d.gr[selIdx]||0);
+    document.getElementById('grFill').style.width=Math.min(gr/20*100,100)+'%';
+    document.getElementById('grVal').textContent=(d.gr[selIdx]||0).toFixed(1)+' dB';
+  }
+}
+
+// ==================== APPLY STATE ====================
+function applyState(){
+  if(!dspState)return;
+  // Populate preset select
+  const ps=document.getElementById('presetSelect');
+  ps.innerHTML='';for(let i=0;i<20;i++){const o=document.createElement('option');o.value=i;o.textContent=`P${String(i+1).padStart(2,'0')}`;if(i===(dspState.preset||0))o.selected=true;ps.appendChild(o);}
+  // Apply mute states
+  ['in1','in2'].forEach((id,i)=>{const m=dspState.inputs?.[i]?.mute;document.getElementById('mute-'+id).classList.toggle('active',!!m);});
+  outNames.forEach((id,i)=>{const m=dspState.outputs?.[i]?.mute;document.getElementById('mute-'+id).classList.toggle('active',!!m);});
+  refreshPanel();
+}
+
+// ==================== CHANNEL SELECTION ====================
+function selectCh(type,idx){
+  selType=type;selIdx=idx;
+  document.querySelectorAll('.ch-strip').forEach(el=>el.classList.remove('selected'));
+  const key=chNames[type][idx];
+  document.getElementById('ch-'+key).classList.add('selected');
+  // Update tab visibility for input vs output
+  const isOut=type==='out';
+  document.querySelectorAll('[data-tab=xover],[data-tab=delay],[data-tab=limiter],[data-tab=routing]').forEach(b=>b.style.display=isOut?'':'none');
+  refreshPanel();
+}
+
+function refreshPanel(){
+  if(!dspState)return;
+  const isOut=selType==='out';
+  const ch=isOut?dspState.outputs?.[selIdx]:dspState.inputs?.[selIdx];
+  if(!ch)return;
+  const name=isOut?`OUT ${String.fromCharCode(65+selIdx)}`:`IN ${selIdx+1}`;
+  document.getElementById('selChName').textContent=name;
+  if(isOut){
+    document.getElementById('routeSrc').value=ch.source??2;
+    document.getElementById('outGain').value=ch.gain??0;
+    document.getElementById('outGainVal').textContent=(ch.gain??0).toFixed(1)+' dB';
+    document.getElementById('phaseBtn').textContent=ch.phase?'180°':'0°';
+    document.getElementById('phaseBtn').className='toggle-btn '+(ch.phase?'on':'');
+    // Crossover
+    const hpf=ch.hpf||{};const lpf=ch.lpf||{};
+    setToggle('hpfEn',hpf.en);document.getElementById('hpfFreq').value=hpf.freq??20;document.getElementById('hpfType').value=hpf.type??2;document.getElementById('hpfSlope').value=hpf.slope??4;
+    setToggle('lpfEn',lpf.en);document.getElementById('lpfFreq').value=lpf.freq??20000;document.getElementById('lpfType').value=lpf.type??2;document.getElementById('lpfSlope').value=lpf.slope??4;
+    // Delay
+    const dms=ch.delay_ms??0;document.getElementById('delaySlider').value=dms;document.getElementById('delayVal').textContent=dms.toFixed(1)+' ms';
+    const cm=dms*34.3;document.getElementById('delayDist').textContent=cm.toFixed(1)+' cm / '+(cm/2.54).toFixed(1)+' in';
+    document.getElementById('delaySamples').textContent=Math.round(dms*96);
+    // Limiter
+    const lim=ch.limiter||{};setToggle('limEn',lim.en);
+    document.getElementById('limThresh').value=lim.thresh??-2;document.getElementById('limThreshVal').textContent=(lim.thresh??-2).toFixed(1)+' dBFS';
+    document.getElementById('limAttack').value=lim.attack??10;document.getElementById('limAttackVal').textContent=Math.round(lim.attack??10)+' ms';
+    document.getElementById('limRelease').value=lim.release??100;document.getElementById('limReleaseVal').textContent=Math.round(lim.release??100)+' ms';
+  }
+  // PEQ table
+  const peqBands=ch.peq||[];const isOutput=isOut;const numBands=isOut?7:5;
+  const tbody=document.getElementById('peqBody');tbody.innerHTML='';
+  const types=['Bell','LowShelf','HiShelf','Notch','AllPass','BandPass'];
+  for(let b=0;b<numBands;b++){
+    const band=peqBands[b]||{};
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${b+1}</td>
+      <td><input type="checkbox" ${band.en?'checked':''} onchange="setPEQ(${b},'en',this.checked)"></td>
+      <td><select onchange="setPEQ(${b},'type',+this.value)">${types.map((t,i)=>`<option value="${i}" ${(band.type??0)===i?'selected':''}>${t}</option>`).join('')}</select></td>
+      <td><input type="number" value="${(band.freq??1000).toFixed(1)}" min="20" max="20000" step="1" onchange="setPEQ(${b},'freq',+this.value)"></td>
+      <td><input type="number" value="${(band.gain??0).toFixed(1)}" min="-20" max="20" step="0.5" onchange="setPEQ(${b},'gain',+this.value)"></td>
+      <td><input type="number" value="${(band.q??1).toFixed(2)}" min="0.1" max="30" step="0.1" onchange="setPEQ(${b},'q',+this.value)"></td>`;
+    tbody.appendChild(tr);
+  }
+  // FIR
+  const fir=ch.fir||{};setToggle('firEn',fir.en);
+  document.getElementById('firTaps').textContent=`${fir.taps??1} / 256`;
+  drawFIRCanvas(fir.c||[1]);
+}
+
+// ==================== HELPER ====================
+function setToggle(id,on){const el=document.getElementById(id);el.textContent=on?'ON':'OFF';el.className='toggle-btn '+(on?'on':'off');}
+function send(obj){if(ws&&ws.readyState===1)ws.send(JSON.stringify(obj));}
+
+// ==================== COMMANDS ====================
+function toggleMute(ch){
+  const btn=document.getElementById('mute-'+ch);const active=!btn.classList.contains('active');btn.classList.toggle('active',active);
+  send({cmd:'mute',ch:ch,state:active});
+}
+function setRoute(){send({cmd:'route',ch:selIdx,val:+document.getElementById('routeSrc').value});}
+function setOutGain(){const v=+document.getElementById('outGain').value;document.getElementById('outGainVal').textContent=v.toFixed(1)+' dB';send({cmd:'outputGain',ch:selIdx,val:v});}
+function togglePhase(){
+  if(!dspState)return;const ch=dspState.outputs?.[selIdx];if(!ch)return;ch.phase=!ch.phase;
+  send({cmd:'phase',ch:outNames[selIdx],val:ch.phase});refreshPanel();
+}
+function toggleXover(which){
+  if(!dspState)return;const ch=dspState.outputs?.[selIdx];if(!ch)return;
+  ch[which]=ch[which]||{};ch[which].en=!ch[which].en;
+  send({cmd:which,ch:selIdx,en:ch[which].en});refreshPanel();
+}
+function setXover(which){
+  send({cmd:which,ch:selIdx,
+    en:document.getElementById(which+'En').textContent==='ON',
+    freq:+document.getElementById(which+'Freq').value,
+    type:+document.getElementById(which+'Type').value,
+    slope:+document.getElementById(which+'Slope').value
+  });
+}
+function setPEQ(band,param,val){
+  const cmd=selType==='out'?'outputPEQ':'inputPEQ';
+  const msg={cmd:cmd,ch:selIdx,band:band};msg[param]=val;send(msg);
+  // Update local state
+  if(dspState){const ch=selType==='out'?dspState.outputs?.[selIdx]:dspState.inputs?.[selIdx];if(ch&&ch.peq&&ch.peq[band])ch.peq[band][param]=val;}
+}
+function toggleFIR(){
+  if(!dspState)return;
+  const isOut=selType==='out';const ch=isOut?dspState.outputs?.[selIdx]:dspState.inputs?.[selIdx];if(!ch)return;
+  ch.fir=ch.fir||{};ch.fir.en=!ch.fir.en;
+  send({cmd:'fir',isOutput:isOut,ch:selIdx,en:ch.fir.en});refreshPanel();
+}
+function uploadFIR(){
+  const file=document.getElementById('firFile').files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const text=e.target.result;
+    const coeffs=text.split(/[\r\n,]+/).map(s=>parseFloat(s.trim())).filter(v=>!isNaN(v));
+    if(coeffs.length<1){alert('No valid coefficients found');return;}
+    if(coeffs.length>256){alert('Max 256 taps. Truncating.');coeffs.length=256;}
+    send({cmd:'firCoeffs',isOutput:selType==='out',ch:selIdx,coeffs:coeffs});
+    // Update local state
+    if(dspState){const ch=selType==='out'?dspState.outputs?.[selIdx]:dspState.inputs?.[selIdx];
+    if(ch){ch.fir=ch.fir||{};ch.fir.en=true;ch.fir.taps=coeffs.length;ch.fir.c=coeffs;}}
+    refreshPanel();
+  };
+  reader.readAsText(file);
+}
+function setDelay(){
+  const v=+document.getElementById('delaySlider').value;
+  document.getElementById('delayVal').textContent=v.toFixed(1)+' ms';
+  const cm=v*34.3;document.getElementById('delayDist').textContent=cm.toFixed(1)+' cm / '+(cm/2.54).toFixed(1)+' in';
+  document.getElementById('delaySamples').textContent=Math.round(v*96);
+  send({cmd:'delay',ch:selIdx,val:v});
+}
+function toggleLimiter(){
+  if(!dspState)return;const ch=dspState.outputs?.[selIdx];if(!ch)return;
+  ch.limiter=ch.limiter||{};ch.limiter.en=!ch.limiter.en;
+  send({cmd:'limiter',ch:selIdx,en:ch.limiter.en});refreshPanel();
+}
+function setLimiter(){
+  const t=+document.getElementById('limThresh').value;const a=+document.getElementById('limAttack').value;const r=+document.getElementById('limRelease').value;
+  document.getElementById('limThreshVal').textContent=t.toFixed(1)+' dBFS';
+  document.getElementById('limAttackVal').textContent=Math.round(a)+' ms';
+  document.getElementById('limReleaseVal').textContent=Math.round(r)+' ms';
+  send({cmd:'limiter',ch:selIdx,en:document.getElementById('limEn').textContent==='ON',thresh:t,attack:a,release:r});
+}
+function presetSave(){const s=+document.getElementById('presetSelect').value;send({cmd:'presetSave',slot:s});}
+function presetExport(){send({cmd:'presetExport'});}
+
+// ==================== FIR CANVAS ====================
+function drawFIRCanvas(coeffs){
+  const c=document.getElementById('firCanvas');const ctx=c.getContext('2d');
+  c.width=c.clientWidth;c.height=c.clientHeight;
+  ctx.clearRect(0,0,c.width,c.height);
+  const mid=c.height/2;ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,mid);ctx.lineTo(c.width,mid);ctx.stroke();
+  if(!coeffs||coeffs.length<1)return;
+  let mx=0.001;coeffs.forEach(v=>{if(Math.abs(v)>mx)mx=Math.abs(v);});
+  const step=c.width/Math.max(coeffs.length,1);
+  coeffs.forEach((v,i)=>{
+    const x=i*step;const h=(v/mx)*(mid-4);
+    ctx.fillStyle=v>=0?'var(--green)':'var(--red)';
+    if(h>0)ctx.fillRect(x,mid-h,Math.max(step-1,1),h);
+    else ctx.fillRect(x,mid,Math.max(step-1,1),-h);
+  });
+}
+
+// ==================== VISUALIZER CANVAS ====================
+function resizeViz(){const c=document.getElementById('vizCanvas');c.width=c.parentElement.clientWidth-24;c.height=c.parentElement.clientHeight-24;drawViz();}
+window.addEventListener('resize',resizeViz);
+function drawViz(){
+  const c=document.getElementById('vizCanvas');const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,c.width,c.height);
+  // Grid
+  ctx.strokeStyle='#1a1a30';ctx.lineWidth=1;
+  for(let i=1;i<10;i++){ctx.beginPath();ctx.moveTo(0,c.height/10*i);ctx.lineTo(c.width,c.height/10*i);ctx.stroke();}
+  // Freq labels
+  ctx.fillStyle='#444';ctx.font='10px Inter';
+  ['20','50','100','200','500','1k','2k','5k','10k','20k'].forEach((f,i)=>{ctx.fillText(f,i*(c.width/10)+2,c.height-4);});
+  // Mock crossover curves per output
+  if(!dspState)return;
+  const colors=['#00bcd4','#ff9100','#00e676','#ff1744'];
+  dspState.outputs?.forEach((out,oi)=>{
+    ctx.beginPath();ctx.strokeStyle=colors[oi];ctx.lineWidth=2;ctx.globalAlpha=0.8;
+    for(let x=0;x<c.width;x++){
+      const freq=20*Math.pow(1000,x/c.width); // log scale 20Hz-20kHz
+      let mag=0; // dB
+      if(out.hpf?.en){const fc=out.hpf.freq||20;const ord=(out.hpf.slope||4)*6;if(freq<fc)mag-=ord*Math.log2(fc/freq);}
+      if(out.lpf?.en){const fc=out.lpf.freq||20000;const ord=(out.lpf.slope||4)*6;if(freq>fc)mag-=ord*Math.log2(freq/fc);}
+      mag=Math.max(mag,-60);
+      const y=c.height/2-(mag/60)*c.height/2;
+      if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    }
+    ctx.stroke();ctx.globalAlpha=1;
+  });
+}
+
+// ==================== TABS ====================
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ==================== SETTINGS ====================
+function showSettings(){document.getElementById('settingsModal').classList.add('visible');document.getElementById('passMsg').textContent='';}
+function hideSettings(){document.getElementById('settingsModal').classList.remove('visible');}
+function changePassword(){
+  const o=document.getElementById('oldPass').value;const n=document.getElementById('newPass').value;const n2=document.getElementById('newPass2').value;
+  const m=document.getElementById('passMsg');
+  if(!o||!n){m.className='msg err';m.textContent='Fill all fields';return;}
+  if(n!==n2){m.className='msg err';m.textContent='Passwords do not match';return;}
+  if(n.length<4){m.className='msg err';m.textContent='Min 4 characters';return;}
+  send({cmd:'changePassword',oldPass:o,newPass:n});
+}
+
+// ==================== INIT ====================
+selectCh('out',0);
+// Try auto-login with stored token
+const storedToken=localStorage.getItem('dlms_token');
+if(storedToken){authToken=storedToken;initWS();}
+</script>
+</body>
+</html>
